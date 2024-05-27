@@ -6,7 +6,7 @@ warnings.filterwarnings("ignore", message="delta_grad == 0.0. Check if the appro
 from EconModel import EconModelClass
 
 from consav.grids import nonlinspace
-from consav.linear_interp import interp_2d
+from consav.linear_interp import interp_2d, interp_3d
 
 class DynHouseholdLaborModelClass(EconModelClass):
 
@@ -36,7 +36,12 @@ class DynHouseholdLaborModelClass(EconModelClass):
 
         # children
         par.p_birth = 0.1
-
+        #interest rate
+        par.r = 0.03
+        #assets
+        par.a_max = 5.0 # maximum point in wealth grid
+        par.a_min = -10.0 # minimum point in wealth grid
+        par.Na = 70 # number of grid points in wealth grid 
         # income
         par.wage_const_1 = np.log(10_000.0) # constant, men
         par.wage_const_2 = np.log(10_000.0) # constant, women
@@ -79,15 +84,19 @@ class DynHouseholdLaborModelClass(EconModelClass):
         sim = self.sim
 
         par.simT = par.T
-        
+
+        #assets grid
+        par.a_grid = nonlinspace(par.a_min,par.a_max,par.Na,1.1)
         # a. human capital grid
-        par.k_grid = nonlinspace(0.0,par.k_max,par.Nk,1.1)
+        par.k1_grid = nonlinspace(0.0,par.k_max,par.Nk,1.1)
+        par.k2_grid = nonlinspace(0.0,par.k_max,par.Nk,1.1)
 
         # b. number of children grid
         par.n_grid = np.arange(0,par.num_n)
 
         # d. solution arrays
-        shape = (par.T,par.num_n,par.Nk,par.Nk)
+        shape = (par.T,par.num_n,par.Na,par.Nk,par.Nk)
+        sol.c = np.nan + np.zeros(shape)
         sol.h1 = np.nan + np.zeros(shape)
         sol.h2 = np.nan + np.zeros(shape)
         sol.V = np.nan + np.zeros(shape)
@@ -128,61 +137,95 @@ class DynHouseholdLaborModelClass(EconModelClass):
 
             # i. loop over state variables: human capital for each household member
             for i_n,kids in enumerate(par.n_grid):
-                for i_k1,capital1 in enumerate(par.k_grid):
-                    for i_k2,capital2 in enumerate(par.k_grid):
-                        idx = (t,i_n,i_k1,i_k2)
-                        
-                        # ii. find optimal hours of both members at this level of wealth in this period t.
-                        if t==(par.T-1): # last period
-                            obj = lambda x: -self.util(x[0],x[1],kids,capital1,capital2)
+                for i_a, assets in enumerate(par.a_grid):
+                    for i_k1,capital1 in enumerate(par.k1_grid):
+                        for i_k2,capital2 in enumerate(par.k2_grid):
+                            idx = (t,i_n,i_a,i_k1,i_k2)
+                            
+                            # ii. find optimal hours of both members at this level of wealth in this period t.
+                            if t==(par.T-1): # last period
+                                print(f"Last period: {t}")
+                                obj = lambda x: self.obj_last(x[0],x[1],assets,capital1,capital2,kids)
+                                
 
-                        else:
-                            obj = lambda x: - self.value_of_choice(x[0],x[1],t,kids,capital1,capital2)  
+                                # call optimizer
+                                bounds = [(0,np.inf) for i in range(2)]
+                            
+                                init_h = np.array([0.1,0.1])
+                                #if i_k1>0: 
+                                    #init_h[0] = sol.h1[t,i_n,i_k1-1,i_k2]
+                                #if i_k2>0: 
+                                    #init_h[1] = sol.h2[t,i_n,i_k1,i_k2-1]
 
-                        # call optimizer
-                        bounds = [(0,np.inf) for i in range(2)]
-                        
-                        init_h = np.array([0.1,0.1])
-                        if i_k1>0: 
-                            init_h[0] = sol.h1[t,i_n,i_k1-1,i_k2]
-                        if i_k2>0: 
-                            init_h[1] = sol.h2[t,i_n,i_k1,i_k2-1]
+                                res = minimize(obj,init_h,bounds=bounds) 
+                                # store results
+                                sol.c[idx] = self.cons_last(res.x[0],res.x[1],assets,capital1, capital2)
+                                sol.h1[idx] = res.x[0]
+                                sol.h2[idx] = res.x[1]
+                                sol.V[idx] = -res.fun
+                                print(f"V: {sol.V[idx]}")
+                                print(f"h1: {sol.h1[idx]}")
+                                print(f"h2: {sol.h2[idx]}")
+                                print(f"c: {sol.c[idx]}")
 
-                        res = minimize(obj,init_h,bounds=bounds) 
+                            else:
+                                obj = lambda x: - self.value_of_choice(x[0],x[1],x[2],t,kids,capital1,capital2, assets)  
 
-                        # store results
-                        sol.h1[idx] = res.x[0]
-                        sol.h2[idx] = res.x[1]
-                        sol.V[idx] = -res.fun
+                            # call optimizer
+                            bounds = [(0,np.inf) for i in range(3)]
+                            
+                            init = np.array([0.1,0.1, 0.5])
+                            #if i_k1>0: 
+                                #init_h[0] = sol.h1[t,i_n,i_k1-1,i_k2]
+                            #if i_k2>0: 
+                                #init_h[1] = sol.h2[t,i_n,i_k1,i_k2-1]
+
+                            res = minimize(obj,init_h,bounds=bounds) 
+
+                            # store results
+                            sol.h1[idx] = res.x[0]
+                            sol.h2[idx] = res.x[1]
+                            sol.c[idx] = res.x[2]
+                            sol.V[idx] = -res.fun
  
 
-    def value_of_choice(self,hours1,hours2,t,kids,capital1,capital2):
+    def value_of_choice(self,cons,hours1,hours2,t,kids,capital1,capital2,assets):
 
         # a. unpack
         par = self.par
         sol = self.sol
+        # b. penalty for violating bounds. 
+        penalty = 0.0
+        if cons < 0.0:
+            penalty += cons*1_000.0
+            cons = 1.0e-5
+        if hours < 0.0:
+            penalty += hours*1_000.0
+            hours = 0.0
 
         # b. current utility
-        util = self.util(hours1,hours2,kids,capital1,capital2)
+        util = self.util(cons,hours1,hours2,kids,capital1,capital2, kids)
         
         # c. continuation value
         k1_next = (1.0-par.delta)*capital1 + hours1
         k2_next = (1.0-par.delta)*capital2 + hours2
+        income = self.wage_func(capital1,t) * hours1 + self.wage_func(capital2,t) * hours2
+        a_next = (1.0+par.r)*(assets + income - cons)
 
         # no birth
         kids_next = kids  
         V_next = sol.V[t+1,kids_next]     
-        V_next_no_birth = interp_2d(par.k_grid,par.k_grid,V_next,k1_next,k2_next)
+        V_next_no_birth = interp_3d(par.k1_grid,par.k2_grid,par.a_grid,V_next,k1_next,k2_next,a_next) + penalty
 
         # birth
         if (kids>=(par.num_n-1)):
             # cannot have more children
-            V_next_birth = V_next_no_birth
+            V_next_birth = V_next_no_birth + penalty
 
         else:
             kids_next = kids + 1
             V_next = sol.V[t+1,kids_next]
-            V_next_birth = interp_2d(par.k_grid,par.k_grid,V_next,k1_next,k2_next)
+            V_next_birth = interp_3d(par.k1_grid,par.k2_grid,par.a_grid,V_next,k1_next,k2_next, a_next) + penalty
 
         EV_next = par.p_birth * V_next_birth + (1-par.p_birth)*V_next_no_birth
 
@@ -190,83 +233,9 @@ class DynHouseholdLaborModelClass(EconModelClass):
         # d. return value of choice
         return util + par.beta*EV_next
     
-    def value_of_choice_single(self,C_tot,hours,assets,capital,kids,gender,t):
-
-        # a. unpack
-        par = self.par
-        sol = self.sol
-
-        #b. Specify consumption levels. 
-        # flow-utility
-        C_priv = usr.cons_priv_single(C_tot,gender,par)
-        C_pub = C_tot - C_priv
-        
-        # b. penalty for violating bounds. 
-        penalty = 0.0
-        if C_tot < 0.0:
-            penalty += C_tot*1_000.0
-            C_tot = 1.0e-5
-        if hours < 0.0:
-            penalty += hours*1_000.0
-            hours = 0.0
-
-        # c. utility from consumption
-        util = usr.util(C_priv, C_pub,hours,gender,kids, par)
-        print(f"util: {util}")
-        # d. *expected* continuation value from savings
-        income = wage_func(self, capital, gender) * hours
-        a_next = (1.0+par.r)*(assets + income - C_tot)
-        k_next = capital + hours
-        
-        # Look over V_next for both genders:
-        if gender == 'women':
-            kids_next = kids
-            V_next = sol.Vw_single[t + 1, kids_next]
-            
-            V_next_no_birth = interp_2d(par.grid_Aw,par.Kw_grid,V_next,a_next,k_next)
-            
-            # birth
-            if (kids>=(par.num_n-1)):
-                # cannot have more children
-                V_next_birth = V_next_no_birth
-            else:
-                kids_next = kids + 1
-                V_next = sol.Vw_single[t + 1, kids_next]
-                V_next_birth = interp_2d(par.grid_Aw,par.Kw_grid,V_next,a_next,k_next)
-            
-        else:
-            kids_next = kids
-            V_next = sol.Vm_single[t + 1, kids_next]
-            V_next_no_birth = interp_2d(par.grid_Am,par.km_grid,V_next,a_next,k_next)
-            # birth
-            if (kids>=(par.num_n-1)):
-                # cannot have more children
-                V_next_birth = V_next_no_birth
-            else:
-                kids_next = kids + 1
-                V_next = sol.Vm_single[t + 1, kids_next]
-                V_next_birth = interp_2d(par.grid_Am,par.km_grid,V_next,a_next,k_next)
-                
-        EV_next = par.p_birth * V_next_birth + (1-par.p_birth)*V_next_no_birth
-        
-        # e. return value of choice (including penalty)
-        return util + par.beta*EV_next + penalty
 
     # relevant functions
-    def consumption(self,hours1,hours2,kids,capital1,capital2):
-        par = self.par
 
-        income1 = self.wage_func(capital1,1) * hours1
-        income2 = self.wage_func(capital2,2) * hours2
-        income_hh = income1+income2
-
-        trans = self.child_tran(hours1,hours2,income_hh,kids)
-
-        total_income = income_hh + trans
-
-        tax = self.tax_func(total_income)
-        
-        return total_income - tax
 
     def wage_func(self,capital,sex):
         # before tax wage rate
@@ -280,11 +249,7 @@ class DynHouseholdLaborModelClass(EconModelClass):
 
         return np.exp(constant + return_K * capital)
 
-    def tax_func(self,income):
-        par = self.par
 
-        rate = 1.0 - par.tax_scale*(income**(-par.tax_pow))
-        return rate*income
 
     def child_tran(self,hours1,hours2,income_hh,kids):
         par = self.par
@@ -301,10 +266,8 @@ class DynHouseholdLaborModelClass(EconModelClass):
 
         return C1+C2+C3+C4
 
-    def util(self,hours1,hours2,kids,capital1,capital2):
+    def util(self,cons,hours1,hours2,kids):
         par = self.par
-
-        cons = self.consumption(hours1,hours2,kids,capital1,capital2)
 
         rho_1 = par.rho_const_1 + par.rho_kids_1*kids
         rho_2 = par.rho_const_2 + par.rho_kids_2*kids
@@ -314,6 +277,18 @@ class DynHouseholdLaborModelClass(EconModelClass):
         util_hours2 = rho_2*(hours2)**(1.0+par.gamma) / (1.0+par.gamma)
 
         return util_cons - util_hours1 - util_hours2
+    
+    # last period
+    def cons_last(self,hours1,hours2,assets,capital1, capital2):
+        par = self.par
+
+        income = self.wage_func(capital1,par.T-1) * hours1 + self.wage_func(capital2,par.T-1) * hours2
+        cons = assets + income
+        return cons
+
+    def obj_last(self,hours1, hours2,assets,capital1, capital2,kids):
+        cons = self.cons_last(hours1, hours2,assets,capital1, capital2)
+        return - self.util(cons,hours1, hours2,kids)  
 
     ##############
     # Simulation #
