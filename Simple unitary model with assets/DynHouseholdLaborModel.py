@@ -103,10 +103,12 @@ class DynHouseholdLaborModelClass(EconModelClass):
 
         # e. simulation arrays
         shape = (par.simN,par.simT)
+        sim.a = np.nan + np.zeros(shape)
         sim.h1 = np.nan + np.zeros(shape)
         sim.h2 = np.nan + np.zeros(shape)
         sim.k1 = np.nan + np.zeros(shape)
         sim.k2 = np.nan + np.zeros(shape)
+        sim.c = np.nan + np.zeros(shape)
         sim.n = np.zeros(shape,dtype=np.int_)
         
         sim.income1 = np.nan + np.zeros(shape)
@@ -117,6 +119,7 @@ class DynHouseholdLaborModelClass(EconModelClass):
         sim.draws_uniform = np.random.uniform(size=shape)
 
         # g. initialization
+        sim.a_init = np.zeros(par.simN)
         sim.k1_init = np.zeros(par.simN)
         sim.k2_init = np.zeros(par.simN)
         sim.n_init = np.zeros(par.simN,dtype=np.int_)
@@ -197,15 +200,15 @@ class DynHouseholdLaborModelClass(EconModelClass):
 
         # b. current utility
         util = self.util(cons, hours1, hours2, kids)
-        print(f"util: {util}")
+        #print(f"util: {util}")
         # c. continuation value
         k1_next = (1.0 - par.delta) * capital1 + hours1
         k2_next = (1.0 - par.delta) * capital2 + hours2
         income = self.wage_func(capital1, t) * hours1 + self.wage_func(capital2, t) * hours2
         a_next = (1.0 + par.r) * (assets + income - cons)
-        print(f"k1_next: {k1_next}")
-        print(f"k2_next: {k2_next}")
-        print(f"a_next: {a_next}")
+        #print(f"k1_next: {k1_next}")
+        #print(f"k2_next: {k2_next}")
+        #print(f"a_next: {a_next}")
         # no birth
         kids_next = kids
         V_next = sol.V[t + 1, kids_next]
@@ -422,13 +425,15 @@ class DynHouseholdLaborModelClass(EconModelClass):
             sim.k1[i,0] = sim.k1_init[i]
             sim.k2[i,0] = sim.k2_init[i]
             sim.n[i,0] = sim.n_init[i]
+            sim.a[i,0] = sim.a_init[i]
 
             for t in range(par.simT):
 
                 # ii. interpolate optimal hours
                 idx_sol = (t,sim.n[i,t])
-                sim.h1[i,t] = interp_2d(par.k_grid,par.k_grid,sol.h1[idx_sol],sim.k1[i,t],sim.k2[i,t])
-                sim.h2[i,t] = interp_2d(par.k_grid,par.k_grid,sol.h2[idx_sol],sim.k1[i,t],sim.k2[i,t])
+                sim.h1[i,t] = interp_3d(par.k1_grid,par.k2_grid,par.a_grid,sol.h1[idx_sol],sim.k1[i,t],sim.k2[i,t], sim.a[i,t])
+                sim.h2[i,t] = interp_3d(par.k1_grid,par.k2_grid,par.a_grid,sol.h2[idx_sol],sim.k1[i,t],sim.k2[i,t],sim.a[i,t])
+                sim.c[i,t] = interp_3d(par.k1_grid,par.k2_grid,par.a_grid,sol.c[idx_sol],sim.k1[i,t],sim.k2[i,t],sim.a[i,t])
 
                 # store income
                 sim.income1[i,t] = self.wage_func(sim.k1[i,t],1)*sim.h1[i,t]

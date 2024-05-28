@@ -26,8 +26,8 @@ class DynHouseholdLaborModelClass(EconModelClass):
         # preferences
         par.beta = 0.98 # discount factor
 
-        par.rho_const_1 = 0.05
-        par.rho_kids_1 = 0.01
+        par.rho_const_1 = 0.2
+        par.rho_kids_1 = 0.6
         par.rho_const_2 = 0.05
         par.rho_kids_2 = 0.01
 
@@ -295,7 +295,7 @@ class DynHouseholdLaborModelClass(EconModelClass):
             C1 = par.uncon_uni                           #unconditional, universal transfer (>0)
             C2 = np.fmax(par.means_level - par.means_slope*income_hh , 0.0) #means-tested transfer (>0)
             # child-care related (net-of-subsidy costs)
-            both_work = (hours1>0.5) * (hours2>0.5)
+            both_work = (hours1>0.3)
             C3 = par.cond*both_work                      #all working couples has this net cost (<0)
             C4 = par.cond_high*both_work*(income_hh>0.5) #low-income couples do not have this net-cost (<0)
 
