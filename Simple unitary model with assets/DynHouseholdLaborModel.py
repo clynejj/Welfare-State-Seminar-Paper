@@ -124,72 +124,171 @@ class DynHouseholdLaborModelClass(EconModelClass):
 
     ############
     # Solution #
-    def solve(self):
 
+    def solve(self):
         # a. unpack
         par = self.par
         sol = self.sol
-        
+
         # b. solve last period
-        
+
         # c. loop backwards (over all periods)
         for t in reversed(range(par.T)):
 
             # i. loop over state variables: human capital for each household member
-            for i_n,kids in enumerate(par.n_grid):
+            for i_n, kids in enumerate(par.n_grid):
                 for i_a, assets in enumerate(par.a_grid):
-                    for i_k1,capital1 in enumerate(par.k1_grid):
-                        for i_k2,capital2 in enumerate(par.k2_grid):
-                            idx = (t,i_n,i_a,i_k1,i_k2)
-                            
+                    for i_k1, capital1 in enumerate(par.k1_grid):
+                        for i_k2, capital2 in enumerate(par.k2_grid):
+                            idx = (t, i_n, i_a, i_k1, i_k2)
+
                             # ii. find optimal hours of both members at this level of wealth in this period t.
-                            if t==(par.T-1): # last period
-                                print(f"Last period: {t}")
-                                obj = lambda x: self.obj_last(x[0],x[1],assets,capital1,capital2,kids)
-                                
+                            if t == (par.T - 1):  # last period
+                                #print(f"Last period: {t}")
+                                obj = lambda x: self.obj_last(x[0], x[1], assets, capital1, capital2, kids)
 
                                 # call optimizer
-                                bounds = [(0,np.inf) for i in range(2)]
-                            
-                                init_h = np.array([0.1,0.1])
-                                #if i_k1>0: 
-                                    #init_h[0] = sol.h1[t,i_n,i_k1-1,i_k2]
-                                #if i_k2>0: 
-                                    #init_h[1] = sol.h2[t,i_n,i_k1,i_k2-1]
+                                bounds = [(0, np.inf) for i in range(2)]
+                                init_h = np.array([0.1, 0.1])
 
-                                res = minimize(obj,init_h,bounds=bounds) 
+                                res = minimize(obj, init_h, bounds=bounds)
                                 # store results
-                                sol.c[idx] = self.cons_last(res.x[0],res.x[1],assets,capital1, capital2)
+                                sol.c[idx] = self.cons_last(res.x[0], res.x[1], assets, capital1, capital2)
                                 sol.h1[idx] = res.x[0]
                                 sol.h2[idx] = res.x[1]
                                 sol.V[idx] = -res.fun
-                                print(f"V: {sol.V[idx]}")
-                                print(f"h1: {sol.h1[idx]}")
-                                print(f"h2: {sol.h2[idx]}")
-                                print(f"c: {sol.c[idx]}")
+                                #print(f"V: {sol.V[idx]}")
+                                #print(f"h1: {sol.h1[idx]}")
+                                #print(f"h2: {sol.h2[idx]}")
+                                #print(f"c: {sol.c[idx]}")
 
                             else:
-                                obj = lambda x: - self.value_of_choice(x[0],x[1],x[2],t,kids,capital1,capital2, assets)  
+                                print(f"Period: {t}")
+                                obj = lambda x: -self.value_of_choice(x[0], x[1], x[2], t, kids, capital1, capital2, assets)
 
-                            # call optimizer
-                            bounds = [(0,np.inf) for i in range(3)]
-                            
-                            init = np.array([0.1,0.1, 0.5])
-                            #if i_k1>0: 
-                                #init_h[0] = sol.h1[t,i_n,i_k1-1,i_k2]
-                            #if i_k2>0: 
-                                #init_h[1] = sol.h2[t,i_n,i_k1,i_k2-1]
+                                # call optimizer
+                                bounds = [(0, np.inf) for i in range(3)]
+                                init = np.array([0.1, 0.1, 0.5])
 
-                            res = minimize(obj,init_h,bounds=bounds) 
+                                res = minimize(obj, init, bounds=bounds)
 
-                            # store results
-                            sol.h1[idx] = res.x[0]
-                            sol.h2[idx] = res.x[1]
-                            sol.c[idx] = res.x[2]
-                            sol.V[idx] = -res.fun
+                                # store results
+                                sol.h1[idx] = res.x[0]
+                                sol.h2[idx] = res.x[1]
+                                sol.c[idx] = res.x[2]
+                                sol.V[idx] = -res.fun
+
+    def value_of_choice(self, cons, hours1, hours2, t, kids, capital1, capital2, assets):
+        # a. unpack
+        par = self.par
+        sol = self.sol
+
+        # b. penalty for violating bounds.
+        penalty = 0.0
+        if cons < 0.0:
+            penalty += cons * 1_000.0
+            cons = 1.0e-5
+        if hours1 < 0.0:
+            penalty += hours1 * 1_000.0
+            hours1 = 0.0
+        if hours2 < 0.0:
+            penalty += hours2 * 1_000.0
+            hours2 = 0.0
+
+        # b. current utility
+        util = self.util(cons, hours1, hours2, kids)
+
+        # c. continuation value
+        k1_next = (1.0 - par.delta) * capital1 + hours1
+        k2_next = (1.0 - par.delta) * capital2 + hours2
+        income = self.wage_func(capital1, t) * hours1 + self.wage_func(capital2, t) * hours2
+        a_next = (1.0 + par.r) * (assets + income - cons)
+
+        # no birth
+        kids_next = kids
+        V_next = sol.V[t + 1, kids_next]
+        V_next_no_birth = interp_3d(par.k1_grid, par.k2_grid, par.a_grid, V_next, k1_next, k2_next, a_next) + penalty
+
+        # birth
+        if kids >= (par.num_n - 1):
+            # cannot have more children
+            V_next_birth = V_next_no_birth + penalty
+        else:
+            kids_next = kids + 1
+            V_next = sol.V[t + 1, kids_next]
+            V_next_birth = interp_3d(par.k1_grid, par.k2_grid, par.a_grid, V_next, k1_next, k2_next, a_next) + penalty
+
+        EV_next = par.p_birth * V_next_birth + (1 - par.p_birth) * V_next_no_birth
+
+        # d. return value of choice
+        return util + par.beta * EV_next
+
+    def solve_ol(self):
+
+            # a. unpack
+            par = self.par
+            sol = self.sol
+            
+            # b. solve last period
+            
+            # c. loop backwards (over all periods)
+            for t in reversed(range(par.T)):
+
+                # i. loop over state variables: human capital for each household member
+                for i_n,kids in enumerate(par.n_grid):
+                    for i_a, assets in enumerate(par.a_grid):
+                        for i_k1,capital1 in enumerate(par.k1_grid):
+                            for i_k2,capital2 in enumerate(par.k2_grid):
+                                idx = (t,i_n,i_a,i_k1,i_k2)
+                                
+                                # ii. find optimal hours of both members at this level of wealth in this period t.
+                                if t==(par.T-1): # last period
+                                    print(f"Last period: {t}")
+                                    obj = lambda x: self.obj_last(x[0],x[1],assets,capital1,capital2,kids)
+                                    
+
+                                    # call optimizer
+                                    bounds = [(0,np.inf) for i in range(2)]
+                                
+                                    init_h = np.array([0.1,0.1])
+                                    #if i_k1>0: 
+                                        #init_h[0] = sol.h1[t,i_n,i_k1-1,i_k2]
+                                    #if i_k2>0: 
+                                        #init_h[1] = sol.h2[t,i_n,i_k1,i_k2-1]
+
+                                    res = minimize(obj,init_h,bounds=bounds) 
+                                    # store results
+                                    sol.c[idx] = self.cons_last(res.x[0],res.x[1],assets,capital1, capital2)
+                                    sol.h1[idx] = res.x[0]
+                                    sol.h2[idx] = res.x[1]
+                                    sol.V[idx] = -res.fun
+                                    #print(f"V: {sol.V[idx]}")
+                                    #print(f"h1: {sol.h1[idx]}")
+                                    print(f"h2: {sol.h2[idx]}")
+                                    print(f"c: {sol.c[idx]}")
+
+                                else:
+                                    obj = lambda x: - self.value_of_choice(x[0],x[1],x[2],t,kids,capital1,capital2, assets)  
+
+                                 # call optimizer
+                                    bounds = [(0,np.inf) for i in range(2)]
+                                
+                                    init = np.array([0.1,0.1, 0.5])
+                                    #if i_k1>0: 
+                                    #init_h[0] = sol.h1[t,i_n,i_k1-1,i_k2]
+                                    #if i_k2>0: 
+                                    #init_h[1] = sol.h2[t,i_n,i_k1,i_k2-1]
+
+                                res = minimize(obj,init_h,bounds=bounds) 
+
+                                # store results
+                                sol.h1[idx] = res.x[0]
+                                sol.h2[idx] = res.x[1]
+                                sol.c[idx] = res.x[2]
+                                sol.V[idx] = -res.fun
  
 
-    def value_of_choice(self,cons,hours1,hours2,t,kids,capital1,capital2,assets):
+    def value_of_choice_ol(self,cons,hours1,hours2,t,kids,capital1,capital2,assets):
 
         # a. unpack
         par = self.par
