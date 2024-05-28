@@ -134,7 +134,7 @@ class DynHouseholdLaborModelClass(EconModelClass):
 
         # c. loop backwards (over all periods)
         for t in reversed(range(par.T)):
-
+            print(f"t: {t}")
             # i. loop over state variables: human capital for each household member
             for i_n, kids in enumerate(par.n_grid):
                 for i_a, assets in enumerate(par.a_grid):
@@ -163,7 +163,7 @@ class DynHouseholdLaborModelClass(EconModelClass):
                                 #print(f"c: {sol.c[idx]}")
 
                             else:
-                                print(f"Period: {t}")
+                                #print(f"Period: {t}")
                                 obj = lambda x: -self.value_of_choice(x[0], x[1], x[2], t, kids, capital1, capital2, assets)
 
                                 # call optimizer
@@ -197,18 +197,20 @@ class DynHouseholdLaborModelClass(EconModelClass):
 
         # b. current utility
         util = self.util(cons, hours1, hours2, kids)
-
+        print(f"util: {util}")
         # c. continuation value
         k1_next = (1.0 - par.delta) * capital1 + hours1
         k2_next = (1.0 - par.delta) * capital2 + hours2
         income = self.wage_func(capital1, t) * hours1 + self.wage_func(capital2, t) * hours2
         a_next = (1.0 + par.r) * (assets + income - cons)
-
+        print(f"k1_next: {k1_next}")
+        print(f"k2_next: {k2_next}")
+        print(f"a_next: {a_next}")
         # no birth
         kids_next = kids
         V_next = sol.V[t + 1, kids_next]
         V_next_no_birth = interp_3d(par.k1_grid, par.k2_grid, par.a_grid, V_next, k1_next, k2_next, a_next) + penalty
-
+        V_next_no_birth
         # birth
         if kids >= (par.num_n - 1):
             # cannot have more children
@@ -365,7 +367,22 @@ class DynHouseholdLaborModelClass(EconModelClass):
 
         return C1+C2+C3+C4
 
-    def util(self,cons,hours1,hours2,kids):
+    def util(self, cons, hours1, hours2, kids):
+        par = self.par
+
+        # Adding a small positive value to avoid division by zero
+        cons = max(cons, 1e-10)
+
+        rho_1 = par.rho_const_1 + par.rho_kids_1 * kids
+        rho_2 = par.rho_const_2 + par.rho_kids_2 * kids
+
+        util_cons = 2 * (cons / 2)**(1.0 + par.eta) / (1.0 + par.eta)
+        util_hours1 = rho_1 * (hours1)**(1.0 + par.gamma) / (1.0 + par.gamma)
+        util_hours2 = rho_2 * (hours2)**(1.0 + par.gamma) / (1.0 + par.gamma)
+
+        return util_cons - util_hours1 - util_hours2
+
+    def util_ol(self,cons,hours1,hours2,kids):
         par = self.par
 
         rho_1 = par.rho_const_1 + par.rho_kids_1*kids
