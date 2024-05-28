@@ -1,0 +1,1 @@
+This is a repository for the results produced in my Seminar paper for Economics of the welfare state. The project solves a lifecyle labour supply model, investigating the effect of child-related transfers.
