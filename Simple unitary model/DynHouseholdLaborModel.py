@@ -26,7 +26,7 @@ class DynHouseholdLaborModelClass(EconModelClass):
         # preferences
         par.beta = 0.98 # discount factor
 
-        par.rho_const_1 = 0.2
+        par.rho_const_1 = 0.05
         par.rho_kids_1 = 0.6
         par.rho_const_2 = 0.05
         par.rho_kids_2 = 0.01
@@ -52,7 +52,7 @@ class DynHouseholdLaborModelClass(EconModelClass):
         # child-related transfers
         par.uncon_uni = 1000
         par.means_level = 1000.0
-        par.means_slope = 25
+        par.means_slope = 0
         par.cond = -0.1
         par.cond_high = -0.1
 
@@ -190,67 +190,7 @@ class DynHouseholdLaborModelClass(EconModelClass):
         # d. return value of choice
         return util + par.beta*EV_next
     
-    def value_of_choice_single(self,C_tot,hours,assets,capital,kids,gender,t):
-
-        # a. unpack
-        par = self.par
-        sol = self.sol
-
-        #b. Specify consumption levels. 
-        # flow-utility
-        C_priv = usr.cons_priv_single(C_tot,gender,par)
-        C_pub = C_tot - C_priv
-        
-        # b. penalty for violating bounds. 
-        penalty = 0.0
-        if C_tot < 0.0:
-            penalty += C_tot*1_000.0
-            C_tot = 1.0e-5
-        if hours < 0.0:
-            penalty += hours*1_000.0
-            hours = 0.0
-
-        # c. utility from consumption
-        util = usr.util(C_priv, C_pub,hours,gender,kids, par)
-        print(f"util: {util}")
-        # d. *expected* continuation value from savings
-        income = wage_func(self, capital, gender) * hours
-        a_next = (1.0+par.r)*(assets + income - C_tot)
-        k_next = capital + hours
-        
-        # Look over V_next for both genders:
-        if gender == 'women':
-            kids_next = kids
-            V_next = sol.Vw_single[t + 1, kids_next]
-            
-            V_next_no_birth = interp_2d(par.grid_Aw,par.Kw_grid,V_next,a_next,k_next)
-            
-            # birth
-            if (kids>=(par.num_n-1)):
-                # cannot have more children
-                V_next_birth = V_next_no_birth
-            else:
-                kids_next = kids + 1
-                V_next = sol.Vw_single[t + 1, kids_next]
-                V_next_birth = interp_2d(par.grid_Aw,par.Kw_grid,V_next,a_next,k_next)
-            
-        else:
-            kids_next = kids
-            V_next = sol.Vm_single[t + 1, kids_next]
-            V_next_no_birth = interp_2d(par.grid_Am,par.km_grid,V_next,a_next,k_next)
-            # birth
-            if (kids>=(par.num_n-1)):
-                # cannot have more children
-                V_next_birth = V_next_no_birth
-            else:
-                kids_next = kids + 1
-                V_next = sol.Vm_single[t + 1, kids_next]
-                V_next_birth = interp_2d(par.grid_Am,par.km_grid,V_next,a_next,k_next)
-                
-        EV_next = par.p_birth * V_next_birth + (1-par.p_birth)*V_next_no_birth
-        
-        # e. return value of choice (including penalty)
-        return util + par.beta*EV_next + penalty
+    
 
     # relevant functions
     def consumption(self,hours1,hours2,kids,capital1,capital2):
@@ -293,7 +233,7 @@ class DynHouseholdLaborModelClass(EconModelClass):
         
         else:
             C1 = par.uncon_uni                           #unconditional, universal transfer (>0)
-            C2 = np.fmax(par.means_level - par.means_slope*income_hh , 0.0) #means-tested transfer (>0)
+            C2 = par.means_level - par.means_slope*income_hh #means-tested transfer (>0)
             # child-care related (net-of-subsidy costs)
             both_work = (hours1>0.3)
             C3 = par.cond*both_work                      #all working couples has this net cost (<0)
